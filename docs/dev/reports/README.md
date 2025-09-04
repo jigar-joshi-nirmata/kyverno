@@ -139,6 +139,55 @@ C(Policy report controller) -->|create/update| R4(Policy report)
 Not shown in this diagram:
 - background scan controller watches resources/policies and maintains an up to date background scan report
 
+### Customizing messages and report properties
+
+Kyverno supports attaching arbitrary key/value properties to rule results via the `spec.rules[].reportProperties` field. These properties are propagated to report results and appear under `results[].properties` in PolicyReports and ClusterPolicyReports.
+
+In addition, specific keys can be used to customize the human-readable message shown in the report for any outcome:
+
+- `message`: generic override applied regardless of outcome
+- `passMessage`: used when result is `pass`
+- `failMessage`: used when result is `fail`
+- `warnMessage`: used when result is `warn`
+- `errorMessage`: used when result is `error`
+- `skipMessage`: used when result is `skip`
+
+When both a status-specific key and `message` are present, the status-specific key takes precedence.
+
+Example:
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+spec:
+  background: true
+  rules:
+  - name: require-image-tag
+    match:
+      any:
+      - resources:
+          kinds: ["Pod"]
+    validate:
+      message: "An image tag is required."
+      foreach:
+        - list: "request.object.spec.containers"
+          pattern:
+            image: "*:*"
+    reportProperties:
+      info: "CREATE"
+      owner: "platform-team"
+      passMessage: "All images are tagged."
+      failMessage: "Image tag is required."
+```
+
+Notes:
+
+- As of Kyverno 1.13+, `reportProperties` are honored for all validation/image verification rules and are included in both admission-time and background reports.
+- For Pod controller resources (e.g., Deployment, StatefulSet, Job, ReplicaSet, CronJob) created via autogen, `reportProperties` from the base Pod rule are propagated to controller results as well.
+- Keys other than the message overrides are passed through verbatim and can be used to tag results (e.g., `info`, `owner`).
+
 ## Storage considerations
 
 The system stores everything in etcd, admission reports (aggregated and short lived ones), background scan reports, and policy reports/cluster policy reports.
