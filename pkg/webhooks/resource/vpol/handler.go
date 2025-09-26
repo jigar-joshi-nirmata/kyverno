@@ -155,3 +155,40 @@ func (h *handler) admissionResponse(request vpolengine.EngineRequest, response v
 	}
 	return admissionutils.Response(request.AdmissionRequest().UID, multierr.Combine(errs...), warnings...)
 }
+
+func (h *handler) admissionReport(ctx context.Context, request vpolengine.EngineRequest, response vpolengine.EngineResponse) error {
+	admissionRequest := request.AdmissionRequest()
+	object, oldObject, err := admissionutils.ExtractResources(nil, admissionRequest)
+	if err != nil {
+		return err
+	}
+	if object.Object == nil {
+		object = oldObject
+	}
+	responses := make([]engineapi.EngineResponse, 0, len(response.Policies))
+	for _, r := range response.Policies {
+		if !reportutils.IsPolicyReportable(&r.Policy) {
+			continue
+		}
+		engineResponse := engineapi.EngineResponse{
+			Resource: object,
+			PolicyResponse: engineapi.PolicyResponse{
+				Rules: r.Rules,
+			},
+		}
+		engineResponse = engineResponse.WithPolicy(engineapi.NewValidatingPolicy(&r.Policy))
+		responses = append(responses, engineResponse)
+	}
+	report := reportutils.BuildAdmissionReport(object, admissionRequest, responses...)
+	if len(report.GetResults()) > 0 {
+		err := breaker.GetReportsBreaker().Do(ctx, func(ctx context.Context) error {
+			_, err := reportutils.CreateEphemeralReport(ctx, report, h.kyvernoClient)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
